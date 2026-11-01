@@ -1,0 +1,466 @@
+\documentclass[9pt,a4paper]{extarticle}
+\usepackage[margin=15mm,top=17mm,bottom=16mm,headheight=12pt,headsep=5pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{Arimo}
+\setsansfont{Arimo}
+\setmonofont[Scale=0.83]{DejaVu Sans Mono}
+\usepackage{multicol,ragged2e,enumitem,booktabs,array,tabularx,xcolor,hyperref,fancyhdr,titlesec,listings,microtype}
+\usepackage{needspace}
+\definecolor{navy}{HTML}{142C48}
+\definecolor{blue}{HTML}{145E88}
+\definecolor{teal}{HTML}{087D79}
+\definecolor{slate}{HTML}{44566A}
+\definecolor{light}{HTML}{F1F5F8}
+\definecolor{line}{HTML}{D9E2E9}
+\definecolor{amber}{HTML}{915E19}
+\hypersetup{colorlinks=true,urlcolor=blue,linkcolor=blue,pdfauthor={Research synthesis from Anthropic documentation},pdftitle={Claude Code - Engineer's Cheatsheet},pdfsubject={Practical Claude Code usage, skills, agents, hooks, security and CI}}
+\setlength{\columnsep}{16pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2.0pt}
+\setlength{\emergencystretch}{1.3em}
+\setlist[itemize]{nosep,topsep=2pt,leftmargin=11pt,itemsep=1.5pt}
+\setlist[enumerate]{nosep,topsep=2pt,leftmargin=13pt,itemsep=1.5pt}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{\scriptsize\color{slate}\bfseries CLAUDE CODE / FIELD GUIDE}\fancyhead[R]{\scriptsize\color{slate}2026-11-01}\fancyfoot[L]{\scriptsize\color{slate}Two-column engineering reference \textbullet{} official-docs cross-check}\fancyfoot[R]{\scriptsize\color{slate}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}\renewcommand{\footrulewidth}{0pt}
+\titleformat{\section}{\large\bfseries\color{navy}}{\thesection}{5pt}{}[\vspace{-5pt}\color{line}\titlerule]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titleformat{\subsection}{\normalsize\bfseries\color{teal}}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{5pt}{1pt}
+\newcommand{\kw}[1]{\textbf{\color{navy}#1}}
+\newcommand{\cmd}[1]{{\footnotesize\color{navy}\texttt{#1}}}
+\newcommand{\src}[1]{\textsuperscript{\color{blue}[#1]}}
+\newcommand{\tip}[1]{\par\textbf{\color{teal}Practice:} #1\par}
+\newcommand{\warn}[1]{\par\textbf{\color{amber}Guardrail:} #1\par}
+\newcommand{\rowtitle}[1]{\textbf{#1}}
+\newenvironment{codebox}{\begin{lstlisting}}{\end{lstlisting}}
+\lstset{basicstyle=\ttfamily\fontsize{7.1}{8.2}\selectfont,breaklines=true,breakatwhitespace=true,columns=fullflexible,keepspaces=true,frame=single,rulecolor=\color{line},backgroundcolor=\color{light},xleftmargin=2pt,xrightmargin=2pt,framesep=3pt,aboveskip=4pt,belowskip=4pt,showstringspaces=false}
+\newenvironment{tablist}{\begin{list}{}{\setlength{\leftmargin}{0pt}\setlength{\rightmargin}{0pt}\setlength{\itemindent}{0pt}\setlength{\itemsep}{1.4pt}\setlength{\parsep}{0pt}\setlength{\topsep}{2pt}}\fontsize{7.7}{9.3}\selectfont}{\end{list}}
+\newcommand{\trow}[2]{\item \textbf{\color{navy}#1} \textcolor{slate}{---} #2}
+\begin{document}
+{\color{navy}\fontsize{19}{21}\selectfont\bfseries Claude Code\\Practical Engineering Cheatsheet}\par\vspace{3pt}
+{\color{slate}\small CLI \textbullet{} prompting \textbullet{} skills \textbullet{} context \textbullet{} subagents \textbullet{} hooks \textbullet{} MCP \textbullet{} CI \textbullet{} enterprise security}\par\vspace{3pt}
+{\footnotesize\color{slate}\textbf{Verified: 1 November 2026.} Designed for developers, tech leads and platform engineers. Built from the attached user-supplied reference and checked against Anthropic's official documentation. Commands change quickly: confirm the local version with \cmd{claude --version}, available commands with \cmd{/help}, and flags with \cmd{claude --help}. Superscript numbers link to sources at the end.}
+\vspace{7pt}\begin{multicols}{2}\raggedcolumns
+
+\section{Operating model: reasoning vs enforcement}
+\kw{Claude Code} is a coding agent with a context-aware agent loop: inspect repo, reason, call tools, edit, test, iterate. The \emph{model proposes} actions; the \emph{runtime/harness} executes and can constrain them.\src{1,2}
+\begin{tablist}
+\trow{Prompt or \cmd{CLAUDE.md}}{Advisory instructions; high flexibility; not a hard safety boundary}
+\trow{Skill \cmd{SKILL.md}}{Reusable, on-demand task procedure; model interprets}
+\trow{Subagent}{Isolated task context; tool/model restrictions; model still reasons}
+\trow{Hook}{Executes on a named lifecycle event; can block and log}
+\trow{Permission rules}{Runtime \cmd{deny > ask > allow}; deterministic access control}
+\trow{Sandbox / OS}{Process-level filesystem/network containment for supported tools}
+\end{tablist}
+\tip{Use models for exploration, synthesis and implementation; use tests, rule engines, permissions, hooks and human approvals for must-pass conditions. An agent cannot make high-impact decisions reliable merely by repeating instructions.}
+
+\section{Install, start and authenticate}
+\kw{Preferred native installers} (macOS/Linux/WSL; Windows PowerShell):\src{3}
+\begin{lstlisting}
+curl -fsSL https://claude.ai/install.sh | bash
+# Windows PowerShell:
+irm https://claude.ai/install.ps1 | iex
+# Alternative, Node.js >=22:
+npm install -g @anthropic-ai/claude-code
+claude --version
+claude doctor
+claude auth login
+\end{lstlisting}
+\kw{Daily flow:}\ \cmd{cd repo \&\& claude} $\to$ \cmd{/init} (first time) $\to$ inspect \cmd{CLAUDE.md} $\to$ ask a bounded task $\to$ test $\to$ \cmd{/diff} $\to$ commit.\src{1,3}
+\begin{lstlisting}
+claude                          # interactive
+claude "explain the payment module"
+claude -c                       # continue recent
+claude -r "auth-refactor"       # resume by name/ID
+claude update                   # native update
+claude auth status              # JSON auth state
+\end{lstlisting}
+\warn{Review an installer script before piping it to a shell in regulated environments. Use enterprise-approved install channels, pinned versions and managed credentials.}
+
+\section{CLI and headless automation}
+\kw{Common flags} (see exact version requirements in the official CLI reference).\src{4}
+\begin{tablist}
+\trow{\cmd{-p}, \cmd{--print}}{Non-interactive task and exit}
+\trow{\cmd{--output-format json}}{Machine-readable result (print mode)}
+\trow{\cmd{--output-format stream-json}}{Incremental event stream}
+\trow{\cmd{--json-schema}}{Validate final structured output against JSON Schema}
+\trow{\cmd{--max-turns N}}{Cap agent turns in print mode; error if exceeded}
+\trow{\cmd{--max-budget-usd N}}{Budget limit in supported print-mode configurations}
+\trow{\cmd{--model <id/alias>}}{Choose model for session}
+\trow{\cmd{--effort <level>}}{Model reasoning effort (availability varies)}
+\trow{\cmd{--permission-mode plan}}{Start read-only planning}
+\trow{\cmd{--allowedTools ...}}{Pre-approve listed tool patterns; \textbf{not} an exhaustive allowlist}
+\trow{\cmd{--tools "Read,Bash"}}{Restrict available built-in tools}
+\trow{\cmd{--disallowedTools ...}}{Deny named tool patterns, including MCP}
+\trow{\cmd{--mcp-config file}}{Load MCP configuration}
+\trow{\cmd{--add-dir dir}}{Additional accessible working directory}
+\trow{\cmd{--bare}}{Minimal fast scripting mode; skip auto-discovery of memory, skills, hooks, MCP, etc.}
+\end{tablist}
+\begin{lstlisting}
+cat build.log | claude -p \
+  "Diagnose root cause; return fixes" \
+  --output-format json --max-turns 8
+
+claude -p "Summarize changed files" \
+  --tools "Read,Bash" \
+  --permission-mode dontAsk \
+  --max-turns 5
+\end{lstlisting}
+\warn{\cmd{--allowedTools} only removes prompts for matched actions. To \emph{limit capabilities}, use \cmd{--tools}, deny rules, sandboxing and infrastructure policy. \cmd{--dangerously-skip-permissions} is for disposable, strictly isolated environments only.}\src{4,7}
+
+\section{Interactive command map}
+\kw{Session / context:}\src{5}
+\begin{tablist}
+\trow{\cmd{/help}, \cmd{/status}, \cmd{/doctor}}{Discover features, environment, diagnostics}
+\trow{\cmd{/init}, \cmd{/memory}}{Bootstrap/edit repo memory}
+\trow{\cmd{/clear} vs \cmd{/compact}}{Fresh task vs summarize current session}
+\trow{\cmd{/context}, \cmd{/usage}, \cmd{/cost}}{Context composition and usage}
+\trow{\cmd{/model}, \cmd{/effort}}{Select model and reasoning budget}
+\trow{\cmd{/plan}}{Enter planning mode}
+\trow{\cmd{/rewind}, \cmd{/diff}}{Restore checkpoint; inspect changes}
+\trow{\cmd{/branch}, \cmd{/resume}}{Explore alternative; restore session}
+\end{tablist}
+\kw{Build, verify, scale:}\src{5,6}
+\begin{tablist}
+\trow{\cmd{/run}, \cmd{/verify}}{Run app and verify behavior (bundled skills)}
+\trow{\cmd{/simplify}}{Review changed code for reuse/quality}
+\trow{\cmd{/code-review [--fix]}}{Bug-focused diff review; optional fixes}
+\trow{\cmd{/security-review}}{Security-focused diff assessment}
+\trow{\cmd{/batch <task>}}{Break large changes into worktrees/PRs}
+\trow{\cmd{/goal <condition>}}{Iteration toward stated completion condition}
+\trow{\cmd{/tasks}, \cmd{/background}}{View tasks; detach session}
+\trow{\cmd{/btw <question>}}{Ephemeral side question}
+\trow{\cmd{/mcp}, \cmd{/plugin}, \cmd{/skills}}{Connections, extensions, available skills}
+\trow{\cmd{/permissions}, \cmd{/sandbox}}{Runtime access and isolation}
+\end{tablist}
+\tip{Availability may vary by version, plan, OS and feature rollout. Slash commands may be built-ins, bundled \emph{skills}, or workflows---do not assume identical execution guarantees.}
+
+\section{Keyboard and prompt shortcuts}
+\begin{tablist}
+\trow{\cmd{Shift+Tab}}{Cycle permission modes (terminal-dependent)}
+\trow{\cmd{Ctrl+C} / \cmd{Esc}}{Interrupt current work}
+\trow{\cmd{Ctrl+O}}{Expand transcript / tool details}
+\trow{\cmd{Ctrl+G}}{Edit prompt in external editor}
+\trow{\cmd{Ctrl+S}}{Stash / restore draft}
+\trow{\cmd{Ctrl+R}}{Search prompt history}
+\trow{\cmd{Ctrl+L}}{Redraw terminal}
+\trow{\cmd{Ctrl+B}}{Background task}
+\trow{\cmd{Ctrl+X Ctrl+K}}{Stop background subagents (confirm twice)}
+\trow{\cmd{@path/to/file}}{Reference repo file}
+\trow{\cmd{@agent-name}}{Invoke selected custom subagent}
+\trow{\cmd{!command}}{Shell command mode; outputs visible to Claude}
+\end{tablist}
+\tip{Use \cmd{@file} for exact context instead of pasting huge files. Paths and image-paste keybindings can be terminal-specific.}\src{8}
+
+\section{Prompt engineering: specification + proof}
+\kw{Template:} \emph{Outcome + scope + constraints + reference + executable verification + output format.}\src{1,9}
+\begin{lstlisting}
+Goal: Add idempotent retries for payment capture.
+Scope: src/payments/; do not modify API contracts.
+Reference: follow patterns in @src/orders/retry.ts.
+Constraints: bounded retries; no duplicate charge;
+  preserve audit events; no secrets in logs.
+Verify: unit + integration tests, lint and types.
+Done when: tests pass and replay test proves
+  same idempotency key cannot double-charge.
+Output: files changed, tests run, remaining risks.
+\end{lstlisting}
+\kw{Task strategies:}
+\begin{itemize}
+\item \textbf{Explore:} Ask it to trace callers and risks before touching code.
+\item \textbf{Plan:} Use \cmd{/plan} for cross-module edits, migrations and public APIs.
+\item \textbf{Execute:} Implement the agreed vertical slice; keep diffs bounded.
+\item \textbf{Prove:} Run executable tests and show evidence, not assurance.
+\item \textbf{Review:} Independent code/security review; inspect git diff.
+\end{itemize}
+\warn{Do not equate \emph{``Task complete''} with correctness. Require reproducible commands, expected/actual output and known limitations.}
+
+\section{Memory and context engineering}
+\kw{Choose the right location:}\src{10,1}
+\begin{tablist}
+\trow{\cmd{./CLAUDE.md}}{Repository-shared instructions (team)}
+\trow{\cmd{./CLAUDE.local.md}}{Git-ignored personal instructions}
+\trow{\cmd{~/.claude/CLAUDE.md}}{Personal global instructions}
+\trow{\cmd{.claude/rules/*.md}}{Modular, often path-scoped policy/conventions}
+\trow{\cmd{.claude/skills/*/SKILL.md}}{Demand-loaded reusable procedure}
+\trow{\cmd{.claude/agents/*.md}}{Specialized subagent profiles}
+\trow{\cmd{.claude/settings.json}}{Project-level permissions/hooks}
+\trow{\cmd{.claude/settings.local.json}}{Per-user project settings}
+\trow{\cmd{~/.claude/settings.json}}{User-wide settings}
+\end{tablist}
+\kw{Recommended \cmd{CLAUDE.md} skeleton:}
+\begin{lstlisting}
+# Project invariants
+- TypeScript strict mode. Node 22.
+- Never silently change public API schemas.
+# Commands
+- Install: pnpm install --frozen-lockfile
+- Test: pnpm test; Types: pnpm tsc --noEmit
+# Design decisions
+- Idempotency is checked in domain service.
+- Write business audit events on each transition.
+# Done
+- Add tests and report command results.
+\end{lstlisting}
+\kw{Path-scoped rules:} \cmd{.claude/rules/api.md}
+\begin{lstlisting}
+---
+paths:
+  - "src/api/**/*.ts"
+---
+- Validate every external input.
+- Keep response contracts backward compatible.
+\end{lstlisting}
+\tip{Aim for fewer than about 200 lines in \cmd{CLAUDE.md}; retain non-obvious facts, conventions and commands. Move detailed procedures to skills and area rules. Do not hard-code speculative 70\%/90\% context reset thresholds; use \cmd{/context} and task boundaries.}\src{1,10}
+
+\section{Skills: reusable procedures in depth}
+\kw{Use when:} You repeatedly issue the same multi-step procedure (migration, reviews, incident response, release, domain design). Skills carry task instructions and supporting files; descriptions are discoverable, full bodies load on invocation. They are interpreted by the model, \emph{not} guaranteed execution controls.\src{11}
+\kw{Where:} \cmd{.claude/skills/<name>/SKILL.md} (project) or \cmd{~/.claude/skills/<name>/SKILL.md} (personal). Invoke \cmd{/<name> [args]}; Claude can trigger an eligible skill by matching its description.\src{11}
+\kw{Example:} \cmd{.claude/skills/fix-issue/SKILL.md}
+\begin{lstlisting}
+---
+name: fix-issue
+description: Fix a tracked bug with a reproducible
+  test and minimal safe patch.
+disable-model-invocation: true
+allowed-tools: Read Grep Glob Bash Edit
+---
+Issue: $ARGUMENTS
+1. Reproduce the failure; capture evidence.
+2. Trace the smallest responsible code path.
+3. Add a failing regression test.
+4. Implement a minimal fix; preserve APIs.
+5. Run tests, lint, type checks and git diff.
+6. Report root cause, patch and residual risk.
+\end{lstlisting}
+\begin{tablist}
+\trow{\cmd{name}, \cmd{description}}{Command identity and discovery}
+\trow{\cmd{disable-model-invocation: true}}{User must trigger; for side-effect procedures}
+\trow{\cmd{user-invocable: false}}{Background reference skill, not user command}
+\trow{\cmd{allowed-tools}}{Pre-approve matching tool uses for the skill; not a sandbox}
+\trow{\cmd{context: fork}}{Run isolated subagent context; task must be self-contained}
+\trow{\cmd{agent: Explore}}{Select agent for forked skill}
+\trow{\cmd{\$ARGUMENTS}}{Text passed after skill name}
+\end{tablist}
+\kw{Design / evaluation practices:}
+\begin{enumerate}
+\item Write a \emph{trigger description} containing the actual problem vocabulary; avoid broad descriptions like ``do coding.''
+\item Put only the workflow in the main \cmd{SKILL.md}; add \cmd{references/}, \cmd{scripts/}, \cmd{assets/} for detail.
+\item State preconditions, execution sequence, failure handling and observable acceptance criteria.
+\item Make destructive workflows manual-invocation only, and keep permissions separately enforced.
+\item Test with positive triggers, near-miss negatives, ambiguous tasks, missing input and adversarial repository content.
+\item Measure quality: activation precision/recall, task success, tool calls, tokens, elapsed time, safety violations.
+\end{enumerate}
+\tip{Start a skill from a successful repeated prompt. Run \cmd{/skills} to audit available skills and \cmd{/doctor} for waste/conflicts.}\src{11}
+
+\section{Subagents and parallel work}
+\kw{Choose a subagent} for bounded context, specialized review or a distinct tool/model profile; choose separate worktrees for concurrent code writing. Child contexts do not automatically inherit all of the parent discussion.\src{12}
+\kw{Example:} \cmd{.claude/agents/security-reviewer.md}
+\begin{lstlisting}
+---
+name: security-reviewer
+description: Review changed code for auth, injection,
+  secrets, data leakage and unsafe side effects.
+tools: Read, Grep, Glob, Bash
+model: inherit
+---
+Only review; never modify files. Inspect git diff.
+Return finding, severity, file:line, exploit path,
+proposed mitigation and missing tests.
+\end{lstlisting}
+\kw{Invoke:} \cmd{@security-reviewer review auth changes} (choose agent from picker), or ask in natural language. Use \cmd{claude --agent security-reviewer} to run a whole session under a profile.\src{12}
+\kw{Advanced:} Add \cmd{isolation: worktree} to a coding subagent to get separate Git workspace; \cmd{model: haiku|sonnet|opus|inherit} (based on availability); \cmd{maxTurns} to bound loops; \cmd{skills} to preload domain knowledge.\src{12}
+\begin{tablist}
+\trow{Subagent}{One task, summarized results to parent; context isolation}
+\trow{\cmd{/batch}}{Large independent refactor units, worktrees and PRs}
+\trow{\cmd{/tasks}}{Inspect background jobs/subagents}
+\trow{\cmd{/background}}{Detach full running session}
+\trow{Agent teams}{Cooperative sessions with shared task planning (feature-dependent)}
+\end{tablist}
+\warn{Parallelism multiplies model usage and increases integration conflicts. Isolate filesystem writes; allocate non-overlapping files/ownership; reconcile and rerun full tests on integration branch.}
+
+\section{Hooks: deterministic lifecycle controls}
+\kw{Hooks} are event-driven commands (or HTTP/prompt/agent handlers) configured in settings or eligible extensions. Invocation is triggered by harness events; a hook's external script must enforce the condition correctly.\src{13}
+\begin{tablist}
+\trow{\cmd{PreToolUse}}{Block protected writes or unsafe tool calls}
+\trow{\cmd{PostToolUse}}{Format/test affected files, observe result}
+\trow{\cmd{PostToolBatch}}{Record results after parallel calls}
+\trow{\cmd{Stop}}{Check completion; report failed verification}
+\trow{\cmd{SessionStart}}{Load concise dynamic context}
+\trow{\cmd{PreCompact}/\cmd{PostCompact}}{Snapshot/restore essential constraints}
+\trow{\cmd{PermissionDenied}}{Observe denied action, route safe retry}
+\trow{\cmd{ConfigChange}}{Audit settings/skills changes}
+\trow{\cmd{SubagentStart}/\cmd{SubagentStop}}{Lifecycle instrumentation}
+\end{tablist}
+\kw{Minimal blocking hook:} project \cmd{.claude/settings.json}:
+\begin{lstlisting}
+{
+ "hooks": {
+  "PreToolUse": [{
+   "matcher": "Edit|Write",
+   "hooks": [{
+    "type": "command",
+    "command": "python3 .claude/hooks/block_protected.py"
+   }]
+  }]
+ }
+}
+\end{lstlisting}
+\kw{Handler:} hook receives JSON on \cmd{stdin}; for \cmd{Edit}/\cmd{Write} inspect \cmd{tool\_input.file\_path}; write a reason to stderr and \cmd{exit(2)} to block. Working example and tests are in the packaged \cmd{examples/} directory.\src{13}
+\warn{An Edit/Write hook does \emph{not} cover writes via Bash, MCP or independent tools. Combine deny rules, sandbox and OS boundary. A Stop hook should guard against recursion and excessive retries. Treat hook scripts as trusted executable code; review changes in PR.}
+
+\section{Permissions, sandbox and safe autonomy}
+\kw{Modes} (names are API/CLI values):\src{7}
+\begin{tablist}
+\trow{\cmd{default} (Manual)}{Prompt for actions needing permission}
+\trow{\cmd{auto}}{Classifier checks actions without routine prompts}
+\trow{\cmd{acceptEdits}}{Auto-approve eligible edits; other tools may prompt}
+\trow{\cmd{plan}}{Read-only exploration and planning}
+\trow{\cmd{dontAsk}}{Deny anything that would otherwise prompt}
+\trow{\cmd{bypassPermissions}}{Bypass prompts; dangerous outside isolation}
+\end{tablist}
+\kw{Prefer declarative permissions:} \cmd{.claude/settings.json}:
+\begin{lstlisting}
+{
+ "permissions": {
+  "allow": ["Bash(pnpm test)",
+            "Bash(pnpm tsc --noEmit)"],
+  "ask": ["Bash(git push *)"],
+  "deny": ["Read(./.env)",
+           "Read(./secrets/**)",
+           "Bash(git push --force *)"]
+ }
+}
+\end{lstlisting}
+\kw{Enforcement order:} \cmd{deny > ask > allow}, regardless of how specific a rule looks. \cmd{auto} is an additional classifier, not a deterministic substitute. Sandbox with \cmd{/sandbox}; configure filesystem/network boundaries, and use strict mode where appropriate.\src{7,14}
+\kw{Enterprise baseline:}
+\begin{itemize}
+\item Centrally managed settings for prohibited operations, MCP allowlists and data-boundary requirements.
+\item Ephemeral development credentials; secret scanner; masked logs and egress restrictions.
+\item Branch protection, signed commits if required, CI tests, PR reviewers and mandatory approval for production changes.
+\item Treat repository text, web pages, issues, MCP results and logs as \emph{untrusted input}; never let them override tool policy.
+\end{itemize}
+\warn{A single deny rule does not protect data from scripts with indirect file access. For high-consequence codebases, isolate workloads at the OS/container and credential layers.}\src{1,14}
+
+\section{MCP, tools and plugins}
+\kw{MCP} connects tools/resources from remote HTTP servers and local stdio processes. Use only vetted providers and least-privilege credentials. \cmd{.mcp.json} at repo root can define team-shared servers, subject to workspace approval.\src{15}
+\begin{lstlisting}
+# HTTP (recommended for most remote servers)
+claude mcp add --transport http docs \
+  --scope project https://mcp.example.com/mcp
+# Local stdio process
+claude mcp add --transport stdio localtools \
+  -- python3 tools/server.py
+claude mcp list
+claude mcp get docs
+claude mcp remove docs
+# Interactive: /mcp
+\end{lstlisting}
+\kw{Design constraints:} expose purpose-built, read-only and typed tools where practical; separate lookup from action; validate schema and authorization at the server; log calls and approval decisions; do not expose hundreds of overlapping tools to the model.\src{15,1}
+\kw{Plugins} package skills, hooks, subagents, MCP and related components. Inspect sources and permissions before using external plugins; install via \cmd{/plugin} UI. Avoid placing API keys in committed \cmd{.mcp.json}.\src{16}
+
+\section{Workflows: copyable engineering prompts}
+\kw{Bug with regression:}
+\begin{lstlisting}
+Reproduce failure in @tests/payments.test.ts;
+trace root cause, add failing regression test,
+implement minimal fix, run full relevant suite,
+and report exact pass/fail commands.
+\end{lstlisting}
+\kw{Controlled refactor:}
+\begin{lstlisting}
+/plan Migrate <component> without API/schema changes.
+Inventory callers; define invariants and rollback;
+sequence small commits; propose acceptance tests.
+\end{lstlisting}
+\kw{Security / privacy review:}
+\begin{lstlisting}
+/security-review
+Also inspect authZ, secret exposure, prompt
+injection and data-exfiltration paths; classify
+findings with evidence and remediation tests.
+\end{lstlisting}
+\kw{Codebase discovery:}
+\begin{lstlisting}
+Locate the entry point and execution path for
+<business flow>. Summarize files, call graph,
+state ownership and gaps. Do not edit code.
+\end{lstlisting}
+\kw{Operational readiness:}
+\begin{lstlisting}
+Define testable readiness: error budgets, traces,
+rollback and migration checks. Implement only
+instrumentation in this slice. Show measurements.
+\end{lstlisting}
+\kw{Doc-to-code:}
+\begin{lstlisting}
+Read @SPEC.md; extract numbered requirements.
+Map each to code and a test. Report missing or
+contradictory requirements before implementation.
+\end{lstlisting}
+\tip{For high-impact architecture or production migrations, separate discovery/specification from the implementation session (\cmd{/clear} after preserving the approved spec).}
+
+\section{Testing, CI and evaluation}
+\kw{Quality gates:} lint + typecheck + unit + contract/integration + security tests + build + explicit diff review. For UI, run and inspect rendered behavior. For agents, add adversarial tests for tool selection, leaked secrets, destructive side effects, race conditions and cost overruns.\src{1,6}
+\kw{Constrained CI pattern:}
+\begin{lstlisting}
+claude -p \
+ "Analyze changed files for likely bugs;
+  return JSON; make no edits" \
+ --tools "Read,Bash" \
+ --permission-mode dontAsk \
+ --max-turns 6 \
+ --output-format json > review.json
+\end{lstlisting}
+\kw{Useful metrics:} pass@1, pass@k, regression rate, changed-file blast radius, test coverage delta, invalid tool calls, mean tokens/task, latency, human intervention, security violations and rollback rate. Track \emph{observed} rather than self-reported success.\src{17}
+\warn{CI must use isolated, least-privilege runners. Tool access, remote endpoints and credentials require independent configuration; \cmd{--output-format json} does not itself guarantee your desired result schema (use \cmd{--json-schema}).}
+
+\section{Cost and failure diagnostics}
+\begin{tablist}
+\trow{Poor recall of constraints}{Shorten CLAUDE.md; add scoped rules; check \cmd{/context}}
+\trow{Repeated wrong edits}{Stop; reproduce; provide authoritative examples and test oracle}
+\trow{Large context / slow loops}{Delegate search; avoid raw dumps; \cmd{/compact}; start clean task}
+\trow{Missing skill trigger}{Improve description; verify \cmd{SKILL.md} path and frontmatter}
+\trow{Subagent conflicts}{Assign exclusive files; use \cmd{isolation: worktree}}
+\trow{Permission surprise}{Inspect \cmd{/permissions}, settings precedence, hook logs}
+\trow{MCP fails}{\cmd{claude mcp list/get}; check auth and environment}
+\trow{Environment unstable}{\cmd{/doctor}, \cmd{/status}, pinned toolchain}
+\end{tablist}
+\tip{Optimizations: smaller tasks; smaller search outputs; shorter memory; specialized subagents; explicit completion tests; use \cmd{/usage} and \cmd{/context} before adjusting model/effort.}\src{1,17}
+
+\section{Corrections to supplied reference}
+The attached reference is valuable but mixes stable practices with product-specific, rapidly changing behavior. This edition makes the following clarifications:
+\begin{itemize}
+\item \cmd{--allowedTools} is \emph{pre-approval}; \cmd{--tools} is the built-in tool-surface restriction.\src{4}
+\item Default interactive sessions may start in \cmd{auto}; \cmd{default} is \emph{Manual} mode, not necessarily the startup default.\src{1,7}
+\item \cmd{--bare} bypasses automatic discovery; it is not universally equivalent to a hermetic, reproducible execution environment.\src{4}
+\item \cmd{CLAUDE.md}, skills and prompts steer model behavior; hooks/permissions are the operational controls.\src{1,11,13}
+\item \cmd{npm} installation now distributes the native binary; it is not fundamentally a separate non-native runtime.\src{3}
+\item Number of hooks, exact shortcuts, agent features and command availability depend on CLI version and platform; check \cmd{/help}, \cmd{/doctor} and official reference rather than pinning unverified totals.\src{5,8,13}
+\item \cmd{/goal}, \cmd{/batch}, cloud review and background features are documented but are \emph{not replacements} for independent test and approval gates.\src{5,6}
+\end{itemize}
+
+\section{Source links and further reading}
+\footnotesize\color{slate}
+\begin{enumerate}[leftmargin=13pt,itemsep=2pt]
+\item \href{https://code.claude.com/docs/en/best-practices}{Best practices for Claude Code}.
+\item \href{https://code.claude.com/docs/en/overview}{Claude Code overview}.
+\item \href{https://code.claude.com/docs/en/setup}{Advanced setup / installation}.
+\item \href{https://code.claude.com/docs/en/cli-reference}{CLI reference}.
+\item \href{https://code.claude.com/docs/en/commands}{Slash command reference}.
+\item \href{https://code.claude.com/docs/en/skills}{Skills and bundled skills}.
+\item \href{https://code.claude.com/docs/en/permissions}{Permissions and modes}.
+\item \href{https://code.claude.com/docs/en/interactive-mode}{Interactive mode and keys}.
+\item \href{https://code.claude.com/docs/en/prompt-library}{Prompt library}.
+\item \href{https://code.claude.com/docs/en/memory}{Memory, CLAUDE.md and rules}.
+\item \href{https://code.claude.com/docs/en/skills}{Skill frontmatter, arguments and eval}.
+\item \href{https://code.claude.com/docs/en/sub-agents}{Custom subagents}.
+\item \href{https://code.claude.com/docs/en/hooks}{Hook lifecycle reference} and \href{https://code.claude.com/docs/en/hooks-guide}{hook guide}.
+\item \href{https://code.claude.com/docs/en/sandboxing}{Sandboxed Bash and boundaries}.
+\item \href{https://code.claude.com/docs/en/mcp}{MCP integrations}.
+\item \href{https://code.claude.com/docs/en/plugins}{Plugins overview}.
+\item \href{https://code.claude.com/docs/en/costs}{Manage costs} and \href{https://code.claude.com/docs/en/github-actions}{GitHub Actions}.
+\end{enumerate}
+\vspace{4pt}\textit{Reference note: The user-supplied document ``Claude Code Ultimate Reference and Engineering Cheatsheet'' was analyzed and cross-checked against these official sources; disputed claims are explicitly corrected rather than replicated.}\par
+\end{multicols}
+\end{document}
